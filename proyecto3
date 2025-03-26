@@ -1,0 +1,120 @@
+import pygame
+import sqlite3
+import yfinance as yf
+import pyttsx3
+import speech_recognition as sr
+import time
+
+# Inicializar pygame
+pygame.init()
+
+# Configuración de la ventana
+WIDTH, HEIGHT = 800, 600
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Convertidor de Monedas Mundial 2.0")
+
+# Inicialización del motor de voz
+engine = pyttsx3.init()
+
+# Configuración de la base de datos
+conn = sqlite3.connect("conversions.db")
+cursor = conn.cursor()
+
+# Crear la tabla de historial si no existe
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS history (
+    timestamp TEXT,
+    amount REAL,
+    from_currency TEXT,
+    to_currency TEXT,
+    result REAL
+)
+''')
+
+conn.commit()
+
+# Cargar imágenes de las expresiones del personaje
+def load_images():
+    images = {}
+    try:
+        images["neutral"] = pygame.image.load("images/neutral.png")
+        images["happy"] = pygame.image.load("images/happy.png")
+        images["surprised"] = pygame.image.load("images/surprised.png")
+        images["confused"] = pygame.image.load("images/confused.png")
+        images["thoughtful"] = pygame.image.load("images/thoughtful.png")
+    except FileNotFoundError as e:
+        print("Error al cargar imágenes:", e)
+    return images
+
+character_images = load_images()
+current_image = character_images["neutral"]
+
+# Función para obtener la tasa de cambio con validación
+def get_exchange_rate(from_currency, to_currency):
+    try:
+        ticker = f"{from_currency}{to_currency}=X"
+        data = yf.Ticker(ticker)
+        history = data.history(period="1d")
+
+        if history.empty:
+            print(f"No se encontraron datos para {from_currency} a {to_currency}")
+            return None
+
+        rate = history["Close"].iloc[-1]
+        return rate
+    except Exception as e:
+        print(f"Error al obtener la tasa de cambio: {e}")
+        return None
+
+# Función para convertir moneda
+def convert_currency(amount, from_currency, to_currency):
+    rate = get_exchange_rate(from_currency, to_currency)
+    if rate:
+        result = amount * rate
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("INSERT INTO history VALUES (?, ?, ?, ?, ?)", 
+                       (timestamp, amount, from_currency, to_currency, result))
+        conn.commit()
+        return result
+    return None
+
+# Función para que el asistente hable
+def speak(text):
+    engine.say(text)
+    engine.runAndWait()
+
+# Función para escuchar comandos de voz
+def listen_for_command():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("Diga el monto y las monedas (Ejemplo: 10 dólares a euros)...")
+        try:
+            audio = recognizer.listen(source)
+            command = recognizer.recognize_google(audio, language="es-ES")
+            return command
+        except sr.UnknownValueError:
+            speak("No entendí, repite por favor.")
+        except sr.RequestError:
+            speak("Error en la conexión de reconocimiento de voz.")
+    return None
+
+# Función principal
+def main():
+    global current_image
+    running = True
+    while running:
+        screen.fill((255, 255, 255))  # Fondo blanco
+        screen.blit(current_image, (250, 200))  # Mostrar personaje
+        
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+        
+        pygame.display.update()
+
+    pygame.quit()
+    conn.close()
+
+# Ejecutar el programa
+if _name_ == "_main_":
+    main()
